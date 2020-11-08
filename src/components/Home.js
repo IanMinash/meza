@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import {
   AppBar,
   Box,
@@ -27,17 +27,13 @@ import { TimePicker } from "@material-ui/pickers";
 import BaseDash, { useStyles } from "./BaseDash";
 import Firebase from "../lib/firebase";
 import { getDay, ordinalSuffix } from "../lib/dateHelpers";
+import { SnackbarContext } from "../App";
 
 const Home = () => {
   const user = Firebase.getCurrentUser();
+  const { setSnackbar } = useContext(SnackbarContext);
 
-  const [savingsGroups, setSavingsGroups] = useState([]);
-
-  const [createOrJoinDialogOpen, setCreateOrJoinDialogOpen] = useState(false);
-  const [groupCreatedOrJoined, setGroupCreatedOrJoined] = useState(false);
-  const [dialogPage, setDialogPage] = useState(0);
-
-  const [groupDetails, setGroupDetails] = useState({
+  const defaultGroupDetails = {
     name: "",
     meeting: {
       dayRank: undefined,
@@ -49,7 +45,17 @@ const Home = () => {
     interestRate: 10,
     members: [user.uid],
     admins: [user.uid],
-  });
+  };
+
+  const [groupId, setGroupId] = useState("");
+
+  const [savingsGroups, setSavingsGroups] = useState([]);
+
+  const [createOrJoinDialogOpen, setCreateOrJoinDialogOpen] = useState(false);
+  const [groupCreatedOrJoined, setGroupCreatedOrJoined] = useState(0);
+  const [dialogPage, setDialogPage] = useState(0);
+
+  const [groupDetails, setGroupDetails] = useState(defaultGroupDetails);
 
   // Get user groups
   useEffect(() => {
@@ -66,9 +72,40 @@ const Home = () => {
   const createGroup = async () => {
     try {
       await Firebase.createDoc("groups", groupDetails);
-      setGroupCreatedOrJoined(true);
+      setCreateOrJoinDialogOpen(false);
+      setGroupDetails(defaultGroupDetails);
+      setGroupCreatedOrJoined(groupCreatedOrJoined + 1);
+      setSnackbar({
+        message: "Savings group created successfully!",
+        open: true,
+        color: "success",
+      });
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  const joinGroup = async () => {
+    try {
+      await Firebase.updateDoc("groups", `${groupId}`, {
+        members: Firebase.firestoreRaw.FieldValue.arrayUnion(user.uid),
+      });
+      setCreateOrJoinDialogOpen(false);
+      setGroupId("");
+      setGroupCreatedOrJoined(groupCreatedOrJoined + 1);
+      setSnackbar({
+        message: "Joined savings group successfully!",
+        open: true,
+        color: "success",
+      });
+    } catch (error) {
+      console.error(error);
+      setSnackbar({
+        message:
+          "Could not join group, please check that you've entered the right Group Code.",
+        open: true,
+        color: "error",
+      });
     }
   };
 
@@ -232,7 +269,7 @@ const Home = () => {
                         ...groupDetails,
                         meeting: {
                           ...groupDetails.meeting,
-                          time: time.setSeconds(0).toTimeString(),
+                          time: time.toTimeString(),
                           datetime: time,
                         },
                       });
@@ -291,17 +328,36 @@ const Home = () => {
             </form>
           )}
           {dialogPage === 1 && (
-            <form>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                joinGroup();
+              }}
+            >
               <TextField
                 variant="outlined"
                 label="Group Code"
-                inputProps={{ minlength: "6", maxlength: "6" }}
-                minlength={6}
-                maxlength={6}
+                inputProps={{
+                  minlength: "6",
+                  maxlength: "6",
+                  style: {
+                    textTransform: "uppercase",
+                    letterSpacing: "0.3em",
+                    fontWeight: "bold",
+                  },
+                }}
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                required
                 fullWidth
               />
               <Box display="flex" mt="1em" justifyContent="flex-end">
-                <Button variant="contained" color="primary" disableElevation>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  type="submit"
+                  disableElevation
+                >
                   Join Group
                 </Button>
               </Box>

@@ -82,7 +82,7 @@ exports.createSavingsGroupWallet = functions
 
     let mezaAcc = await server.loadAccount(mezaKeypair.publicKey());
 
-    const transaction = new TransactionBuilder(mezaAcc, {
+    let transaction = new TransactionBuilder(mezaAcc, {
       fee: BASE_FEE,
       networkPassphrase: Networks.TESTNET,
     })
@@ -98,7 +98,8 @@ exports.createSavingsGroupWallet = functions
         })
       );
 
-    let creatorPubKey = await user.get().pubKey;
+    let creatorPubKey = await (await user.get()).data().pubKey;
+    console.log(`Got creator's public key ${creatorPubKey}`);
 
     // Add creator's signatures to group's wallet
     transaction.addOperation(
@@ -121,9 +122,9 @@ exports.createSavingsGroupWallet = functions
           source: groupKeypair.publicKey(),
         })
       )
-      .setTimeout(0)
-      .build();
+      .setTimeout(0);
 
+    transaction = transaction.build();
     transaction.sign(mezaKeypair, groupKeypair);
 
     try {
@@ -133,6 +134,7 @@ exports.createSavingsGroupWallet = functions
       console.error(
         `An error occured while creating wallet for savings group ${snap.id}`
       );
+      console.error(error);
     }
 
     await admin.firestore().doc(`groups/${snap.id}`).set(
@@ -146,7 +148,7 @@ exports.createSavingsGroupWallet = functions
 
 // 3
 exports.updateSavingsGroup = functions
-  .region("europe-west1")
+  .region("europe-west3")
   .firestore.document("groups/{groupId}")
   .onUpdate(async (snap, context) => {
     let users = await getAllDocs("users", {
@@ -160,7 +162,7 @@ exports.updateSavingsGroup = functions
 
     let mezaAcc = await server.loadAccount(mezaKeypair.publicKey());
 
-    const transaction = new TransactionBuilder(mezaAcc, {
+    let transaction = new TransactionBuilder(mezaAcc, {
       fee: BASE_FEE,
       networkPassphrase: Networks.TESTNET,
     }).addOperation(
@@ -251,9 +253,9 @@ exports.updateSavingsGroup = functions
           source: groupKeypair.publicKey(),
         })
       )
-      .setTimeout(0)
-      .build();
+      .setTimeout(0);
 
+    transaction = transaction.build();
     transaction.sign(
       mezaKeypair,
       ...users.map((user) => Keypair.fromSecret(user.signKey))
