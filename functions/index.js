@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {
+  Asset,
   Server,
   Keypair,
   Networks,
@@ -14,6 +15,8 @@ admin.initializeApp();
 const server = new Server("https://horizon-testnet.stellar.org");
 const mezaSecret = functions.config().meza.secret;
 const mezaKeypair = Keypair.fromSecret(mezaSecret);
+
+const KESM = new Asset("KESM", mezaKeypair.publicKey());
 
 // 1.
 exports.createUserWallet = functions
@@ -42,8 +45,22 @@ exports.createUserWallet = functions
         })
       )
       .addOperation(
+        Operation.changeTrust({
+          asset: KESM,
+          source: userKeypair.publicKey(),
+        })
+      )
+      .addOperation(
         Operation.endSponsoringFutureReserves({
           source: userKeypair.publicKey(),
+        })
+      )
+      // Allow trust so that user can hold our asset
+      .addOperation(
+        Operation.allowTrust({
+          trustor: userKeypair.publicKey(),
+          assetCode: "KESM",
+          authorize: 1,
         })
       )
       .setTimeout(0)
@@ -116,10 +133,24 @@ exports.createSavingsGroupWallet = functions
       })
     );
 
+    transaction.addOperation(
+      Operation.changeTrust({
+        asset: KESM,
+        source: groupKeypair.publicKey(),
+      })
+    );
+
     transaction
       .addOperation(
         Operation.endSponsoringFutureReserves({
           source: groupKeypair.publicKey(),
+        })
+      )
+      .addOperation(
+        Operation.allowTrust({
+          trustor: groupKeypair.publicKey(),
+          assetCode: "KESM",
+          authorize: 1,
         })
       )
       .setTimeout(0);

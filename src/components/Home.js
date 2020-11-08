@@ -24,6 +24,7 @@ import {
 } from "@material-ui/core";
 import { Add, EventNote, People } from "@material-ui/icons";
 import { TimePicker } from "@material-ui/pickers";
+import { Link } from "react-router-dom";
 import BaseDash, { useStyles } from "./BaseDash";
 import Firebase from "../lib/firebase";
 import { getDay, ordinalSuffix } from "../lib/dateHelpers";
@@ -41,7 +42,7 @@ const Home = () => {
       time: undefined,
       datetime: undefined,
     },
-    monthlyContibution: undefined,
+    monthlyContribution: undefined,
     interestRate: 10,
     members: [user.uid],
     admins: [user.uid],
@@ -150,6 +151,17 @@ const Home = () => {
                       </ListItemText>
                     </ListItem>
                   </List>
+                  <Box display="flex" justifyContent="flex-end">
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      component={Link}
+                      to={`/group/${group.id}`}
+                      disableElevation
+                    >
+                      Open
+                    </Button>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
@@ -284,11 +296,11 @@ const Home = () => {
                     label="Monthly Contribution"
                     helperText="Amount people should contribute in each meeting"
                     variant="outlined"
-                    value={groupDetails.monthlyContibution}
+                    value={groupDetails.monthlyContribution}
                     onChange={(e) =>
                       setGroupDetails({
                         ...groupDetails,
-                        monthlyContibution: e.target.value,
+                        monthlyContribution: e.target.value,
                       })
                     }
                     required
@@ -347,7 +359,7 @@ const Home = () => {
                   },
                 }}
                 value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}
+                onChange={(e) => setGroupId(e.target.value.toUpperCase())}
                 required
                 fullWidth
               />
