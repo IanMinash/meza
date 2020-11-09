@@ -189,7 +189,7 @@ exports.updateSavingsGroup = functions
     });
 
     // Get group's keypair
-    let groupKeypair = Keypair.fromSecret(snap.after.signKey());
+    let groupKeypair = Keypair.fromSecret(snap.after.signKey);
 
     let mezaAcc = await server.loadAccount(mezaKeypair.publicKey());
 
