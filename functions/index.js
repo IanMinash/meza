@@ -4,17 +4,30 @@ const {
   Asset,
   Server,
   Keypair,
+  Memo,
   Networks,
   Operation,
   TransactionBuilder,
   BASE_FEE,
 } = require("stellar-sdk");
+const Mpesa = require("mpesa-node");
+const project = process.env.GCLOUD_PROJECT;
 
 admin.initializeApp();
 
 const server = new Server("https://horizon-testnet.stellar.org");
 const mezaSecret = functions.config().meza.secret;
 const mezaKeypair = Keypair.fromSecret(mezaSecret);
+
+const mpesaApi = new Mpesa({
+  consumerKey: functions.config().mpesa.key, // key
+  consumerSecret: functions.config().mpesa.secret, // secret
+  initiatorName: "Meza",
+  shortCode: "601408",
+  lipaNaMpesaShortCode: functions.config().mpesa.shortcode, // shortcode
+  lipaNaMpesaShortPass: functions.config().mpesa.shortpass, // shortpass
+  securityCredential: functions.config().mpesa.credential, // credential
+});
 
 const KESM = new Asset("KESM", mezaKeypair.publicKey());
 
@@ -299,6 +312,201 @@ exports.updateSavingsGroup = functions
       console.error(
         `An error occured while updating wallet for savings group ${snap.id}`
       );
+    }
+  });
+
+/**
+ * HTTP function used to initiate a payment request from a user.
+ *
+ * Requires the following in body:
+ * @param {string}  userId uid of the user depositing the funds
+ * @param {string}  phoneNumber  phoneNumber that the payment request will be sent to
+ * @param {number}  amount Amount to be charged from the number
+ * @param {string}  chamaWallet  The chama to which the user is depositing the funds
+ * @param {string}  reason reason for contribution, could be contribution, loan payment...
+ */
+exports.sendMPesaSTKPushDeposits = functions
+  .region("europe-west3")
+  .https.onRequest(async (req, res) => {
+    console.log(req.body);
+
+    res.set("Access-Control-Allow-Origin", "*");
+
+    if (req.method === "OPTIONS") {
+      // Send response to OPTIONS requests
+      res.set("Access-Control-Allow-Methods", "POST");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      res.set("Access-Control-Max-Age", "3600");
+      res.status(204).send("");
+    }
+
+    if (req.method === "POST") {
+      const { userId, phoneNumber, amount, chamaWallet, reason } = req.body;
+
+      try {
+        let { data } = await mpesaApi.lipaNaMpesaOnline(
+          phoneNumber,
+          amount,
+          `https://europe-west3-${project}.cloudfunctions.net/mpesaSTKCallbackDeposits`,
+          "MEZA" // N/A for till numbers
+        );
+
+        let { CheckoutRequestID, ResponseCode, ResponseDescription } = data;
+
+        if (Number(ResponseCode) === 0) {
+          await admin.firestore().doc(`deposits/${CheckoutRequestID}`).set({
+            userId,
+            chamaWallet,
+            amount,
+            status: "pending",
+            reason,
+            timestamp: Date.now(),
+          });
+
+          console.log(
+            `MpesaSTKPushDeposit transaction ${CheckoutRequestID} initiated for user ${userId}`
+          );
+
+          res.status(202).send({ transactionId: CheckoutRequestID });
+        } else {
+          res.status(400).send({ ResponseCode, ResponseDescription });
+        }
+      } catch (error) {
+        // lipaNaMpesaOnline or firestore op failed
+        if (error.response) {
+          let { ResponseCode, ResponseDescription } = error.response.data;
+          console.error(error.response.data);
+          res.status(400).send({ ResponseCode, ResponseDescription });
+        } else if (error.request) {
+          console.error(error.request);
+        } else {
+          console.error(error.message);
+          res.sendStatus(500);
+        }
+      }
+    }
+  });
+
+/**
+ * HTTP function called by the payment processor after the payment has been resolved, whether failed or successful.
+ */
+exports.mpesaSTKCallbackDeposits = functions
+  .region("europe-west3")
+  .https.onRequest(async (req, res) => {
+    const { Body } = req.body;
+    const { CheckoutRequestID, ResultCode, ResultDesc } = Body.stkCallback;
+    let updateData;
+
+    if (Number(ResultCode) === 0) {
+      // Transaction successful
+      let deposit = await admin
+        .firestore()
+        .doc(`deposits/${CheckoutRequestID}`);
+      let { userId, chamaWallet, reason } = await (await deposit.get()).data();
+
+      let user = await (
+        await admin.firestore().doc(`users/${userId}`).get()
+      ).data();
+      let userKeypair = Keypair.fromSecret(user.signKey);
+
+      /**
+       * Item has the structure:
+       *
+       *    [
+       *     {Name: "MpesaReceiptNumber", Value:"MRLSJHDH9" },
+       *     {Name: "Amount", Value: 10 },
+       *     ...
+       *    ]
+       */
+      const Item = Body.stkCallback.CallbackMetadata.Item;
+
+      let transactionData = {};
+      // Extract data from Item & put it in transactionData
+      Item.forEach((item) => {
+        transactionData[item.Name] = item.Value;
+      });
+
+      const { PhoneNumber, Amount, MpesaReceiptNumber } = transactionData;
+      updateData = {
+        status: "success",
+        phone: PhoneNumber,
+        amount: Amount,
+        MpesaReceiptNumber,
+      };
+
+      // Deposit successful, send asset to user's wallet
+      let mezaAcc = await server.loadAccount(mezaKeypair.publicKey());
+
+      // Assumes trustline to Meza account was already created during user registration
+      const transaction = new TransactionBuilder(mezaAcc, {
+        fee: BASE_FEE,
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          Operation.beginSponsoringFutureReserves({
+            sponsoredId: userKeypair.publicKey(),
+          })
+        )
+        // Issue deposited funds to user's wallet
+        .addOperation(
+          Operation.payment({
+            destination: userKeypair.publicKey(),
+            amount: `${Amount}`,
+            asset: KESM,
+          })
+        )
+        // Send issued funds to chama's wallet from user's wallet
+        .addOperation(
+          Operation.payment({
+            destination: chamaWallet,
+            amount: `${Amount}`,
+            asset: KESM,
+            source: userKeypair.publicKey(),
+          })
+        )
+        .addOperation(
+          Operation.endSponsoringFutureReserves({
+            source: userKeypair.publicKey(),
+          })
+        )
+        .addMemo(Memo.text(reason))
+        .setTimeout(0)
+        .build();
+
+      transaction.sign(mezaKeypair, userKeypair);
+
+      try {
+        await server.submitTransaction(transaction);
+        console.log(
+          `Group ${chamaWallet} credited with KES ${Number(Amount)
+            .toFixed(2)
+            .toLocaleString()} by ${userKeypair.publicKey()}`
+        );
+      } catch (error) {
+        updateData.status = "failed";
+        updateData.failPoint = "stellar";
+        console.error(
+          `An error occured while processing deposit [${CheckoutRequestID}]`
+        );
+      }
+    } else {
+      updateData = {
+        status: "failed",
+        failPoint: "mpesa",
+        message: `${ResultCode}: ${ResultDesc}`,
+      };
+    }
+
+    try {
+      await admin
+        .firestore()
+        .doc(`deposits/${CheckoutRequestID}`)
+        .update(updateData);
+      res.sendStatus(200);
+    } catch (error) {
+      // Firestore op failed
+      console.error(error);
+      res.sendStatus(500);
     }
   });
 

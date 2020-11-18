@@ -7,8 +7,9 @@ import {
   Toolbar,
   IconButton,
   Tooltip,
+  Button,
 } from "@material-ui/core";
-import { Menu, Notifications } from "@material-ui/icons";
+import { AccountBalance, Menu, Notifications } from "@material-ui/icons";
 import { makeStyles } from "@material-ui/core/styles";
 import DashLinks from "./DashLinks";
 import Firebase from "../lib/firebase";
@@ -87,6 +88,17 @@ const Header = (props) => {
               </Grid>
             </Hidden>
             <Grid item xs />
+            <Grid item>
+              <Tooltip title="Account Balance">
+                <Button
+                  variant="outlined"
+                  startIcon={<AccountBalance />}
+                  color="inherit"
+                >
+                  {Number(0).toFixed(2).toLocaleString()}
+                </Button>
+              </Tooltip>
+            </Grid>
             <Grid item>
               <Tooltip title="Alerts • No alerts">
                 <IconButton color="inherit">
